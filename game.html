@@ -1,0 +1,122 @@
+<html>
+    <head>
+        <title>Appsterdam Workshop 1</title>
+        <meta charset="UTF-8">
+    </head>
+    <style>
+        html, body {
+            width: 100%;
+            height: 100%;
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+        }
+        #playground {
+            background-image: url("tiles/grass.png");
+            background-repeat: repeat;
+        }
+        img {
+            -moz-user-select: -moz-none;
+            -khtml-user-select: none;
+            -webkit-user-select: none;
+            -o-user-select: none;
+            user-select: none;
+        }
+    </style>
+    <body>
+        <div id="playground">
+        </div>
+        <script>
+            const playground = document.getElementById("playground");
+            let pressed = {};
+            let objects = new Map();
+            let player_id = null;
+            let dead = false;
+
+            document.onkeydown = (e) => { pressed[e.keyCode] = true; };
+            document.onkeyup = (e) => { pressed[e.keyCode] = false; };
+
+            setInterval(() => {
+                    if (dead) return;
+                    let sx = 0, sy = 0;
+                    if (pressed["38"]) sy -= 1;
+                    if (pressed["40"]) sy += 1;
+                    if (pressed["37"]) sx -= 1;
+                    if (pressed["39"]) sx += 1;
+                    if (sx != 0 || sy != 0) {
+                        socket.send(JSON.stringify({ type: "move", x: sx, y: sy }));
+                    }
+                }, 20);
+
+            playground.onclick = (e) => {
+                if (dead) return;
+                socket.send(JSON.stringify({
+                        type: "fire",
+                        target: { x: event.clientX/32.0, y: event.clientY/32.0 }
+                    }));
+            };
+
+            const socket = new WebSocket(`ws://${window.location.hostname}:14001`);
+            socket.addEventListener("open", function (event) { console.log("connected"); });
+
+            function make_object(msg) {
+                const img = document.createElement("img");
+                img.style.position = "absolute";
+                img.setAttribute("draggable", "false");
+                img.onmousedown = (e) => e.preventDefault();
+                switch (msg.obj_type) {
+                    case "player":
+                        img.src = `/last-guardian-sprites/${msg.character}_fr1.png`;
+                    break;
+                    case "ammo":
+                        img.src = `/ammo/${msg.sprite}.png`;
+                    break;
+                    default:
+                        console.log("unknown object", msg);
+                }
+                objects.set(msg.obj_id, img);
+                playground.appendChild(img);
+                return img;
+            }
+
+            function get_object(msg) {
+                if (!objects.has(msg.obj_id)) return make_object(msg);
+                return objects.get(msg.obj_id);
+            }
+
+            socket.addEventListener("message", function (event) {
+                const msg = JSON.parse(event.data);
+                switch (msg.type) {
+                case "map":
+                    playground.style.width = `${msg.width*32}px`;
+                    playground.style.height = `${msg.height*32}px`;
+                    player_id = msg.player_id;
+                break;
+                case "player_update":
+                    const img = get_object(msg.player);
+                    img.style.left = `${msg.player.x*32-16}px`;
+                    img.style.top = `${msg.player.y*32-16}px`;
+                    if (msg.player.dead) {
+                        if (msg.player.obj_id == player_id) dead = true;
+                        img.style.opacity = 0.5;
+                    }
+                break;
+                case "ammo":
+                        for (const a of msg.ammo) {
+                            const img = get_object(a);
+                            img.style.left = `${a.x*32-16}px`;
+                            img.style.top = `${a.y*32-16}px`;
+                        }
+                break;
+                case "remove":
+                    const elem = objects.get(msg.obj_id);
+                    objects.delete(msg._obj_id);
+                    elem.remove();
+                break;
+                default:
+                    console.log("unknown message", msg);
+                }
+            });
+        </script>
+    </body>
+</html>
